@@ -1,11 +1,10 @@
-# scraper.py (Fokus Hanya pada Scraping Iframe Episode)
+# scraper.py (Final Version - Mengambil data dari JSON di dalam <script>)
 
 import json
 import time
 import os
 import re
 from playwright.sync_api import sync_playwright, TimeoutError
-from bs4 import BeautifulSoup
 
 DATABASE_FILE = "anime_database.json"
 
@@ -15,9 +14,8 @@ def load_database():
         try:
             with open(DATABASE_FILE, 'r', encoding='utf-8') as f:
                 print(f"Database '{DATABASE_FILE}' ditemukan dan dimuat.")
-                # Menggunakan judul sebagai kunci unik untuk pencarian cepat
                 return {show['title']: show for show in json.load(f)}
-        except (json.JSONDecodeError, KeyError):
+        except (json.JSONDecodeError, KeyError, TypeError):
             print(f"[PERINGATAN] File database '{DATABASE_FILE}' rusak atau formatnya lama. Memulai dari awal.")
             return {}
     print(f"Database '{DATABASE_FILE}' tidak ditemukan. Akan membuat yang baru.")
@@ -32,50 +30,58 @@ def save_database(data_dict):
 
 def get_shows_from_main_page(page):
     """
-    Mengambil daftar anime dari halaman utama.
-    Fokus mengambil judul dan URL episode dari thumbnail.
+    METODE BARU: Ekstrak data langsung dari objek JavaScript 'window.KAA'
+    yang ada di dalam HTML. Ini lebih cepat dan jauh lebih andal.
     """
     url = "https://kickass-anime.ru/"
-    print("\n=== TAHAP 1: MENGAMBIL DAFTAR ANIME DARI HALAMAN UTAMA ===")
+    print("\n=== TAHAP 1: MENGAMBIL DATA ANIME DARI SCRIPT TAG ===")
     shows = {}
     try:
-        page.goto(url, timeout=120000)
-        page.wait_for_selector('div.latest-update div.show-item', timeout=60000)
+        page.goto(url, timeout=120000, wait_until='domcontentloaded')
         
-        # Scroll untuk memastikan semua item termuat
-        last_height = page.evaluate("document.body.scrollHeight")
-        while True:
-            page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-            time.sleep(2.5) # Beri jeda lebih lama agar gambar sempat dimuat
-            new_height = page.evaluate("document.body.scrollHeight")
-            if new_height == last_height: break
-            last_height = new_height
-            
+        # Ambil seluruh konten HTML halaman
         html_content = page.content()
-        soup = BeautifulSoup(html_content, 'html.parser')
+        
+        # Gunakan regex untuk menemukan blok 'latestShow' di dalam script
+        match = re.search(r'latestShow:(\[.*?\]),trendingShow', html_content, re.DOTALL)
+        
+        if not match:
+            print("[ERROR] Tidak dapat menemukan blok data 'latestShow' di dalam halaman.")
+            return []
+        
+        # Grup 1 dari match adalah string array '[{...}, {...}]'
+        latest_show_str = match.group(1)
 
-        for item in soup.find_all('div', class_='show-item'):
-            try:
-                title = item.find('h2', class_='show-title').find('a').text.strip()
-                episode_page_url = "https://kickass-anime.ru" + item.find('a', class_='show-poster')['href']
+        # Temukan semua objek di dalam string array (setiap objek adalah satu anime)
+        anime_objects = re.findall(r'({.*?})', latest_show_str, re.DOTALL)
 
-                if title and episode_page_url:
+        for obj_str in anime_objects:
+            # Ekstrak title_en dan watch_uri dari setiap objek
+            title_match = re.search(r'title_en:"(.*?)"', obj_str)
+            uri_match = re.search(r'watch_uri:"(.*?)"', obj_str)
+
+            if title_match and uri_match:
+                title = title_match.group(1).encode('utf-8').decode('unicode-escape')
+                watch_uri = uri_match.group(1).encode('utf-8').decode('unicode-escape')
+                
+                if title and watch_uri:
+                    full_url = "https://kickass-anime.ru" + watch_uri
                     shows[title] = {
                         'title': title,
-                        'episode_page_url': episode_page_url
+                        'episode_page_url': full_url
                     }
-            except (AttributeError, IndexError):
-                continue
-                
-        print(f"Menemukan {len(shows)} anime unik di halaman utama.")
+
+        print(f"Menemukan {len(shows)} anime unik dari data script.")
         return list(shows.values())
+
     except Exception as e:
-        print(f"[ERROR di Tahap 1] Gagal mengambil daftar anime: {e}")
+        print(f"[ERROR di Tahap 1] Gagal mengekstrak data anime: {e}")
         return []
 
 def scrape_episodes_from_url(page, episode_page_url, existing_episode_numbers):
     """
     Membuka halaman episode dan mengambil semua link iframe untuk episode baru.
+    (Fungsi ini tidak perlu diubah)
     """
     newly_scraped_episodes = []
     try:
@@ -87,11 +93,13 @@ def scrape_episodes_from_url(page, episode_page_url, existing_episode_numbers):
         
         episodes_to_scrape = []
         for el in all_on_page_ep_elements:
-            ep_num = el.locator("span.v-chip__content").inner_text()
-            if ep_num not in existing_episode_numbers:
-                episodes_to_scrape.append(ep_num)
+            try:
+                ep_num = el.locator("span.v-chip__content").inner_text(timeout=2000)
+                if ep_num not in existing_episode_numbers:
+                    episodes_to_scrape.append(ep_num)
+            except TimeoutError:
+                continue
 
-        # Mengurutkan episode baru yang akan di-scrape
         episodes_to_scrape.sort(key=lambda x: int(''.join(filter(str.isdigit, x.split()[-1])) or 0))
 
         if not episodes_to_scrape:
@@ -108,7 +116,6 @@ def scrape_episodes_from_url(page, episode_page_url, existing_episode_numbers):
                 iframe_src = None
                 page.wait_for_selector("div.player-container iframe", state='attached', timeout=20000)
                 
-                # Cari iframe yang benar (bukan disqus atau iklan)
                 for frame in page.locator("div.player-container iframe").all():
                     src_attr = frame.get_attribute('src') or ''
                     if 'disqus' not in src_attr and src_attr:
@@ -119,7 +126,7 @@ def scrape_episodes_from_url(page, episode_page_url, existing_episode_numbers):
                 if iframe_src:
                     newly_scraped_episodes.append({
                         "episode_number": ep_num,
-                        "iframe_url": iframe_src  # Langsung simpan URL iframe
+                        "iframe_url": iframe_src
                     })
                 else:
                     print(f"           Gagal menemukan iframe valid untuk episode {ep_num}.")
@@ -144,6 +151,8 @@ def main():
 
         if not shows_list:
             print("Tidak dapat mengambil daftar anime. Program berhenti.")
+            if not os.path.exists(DATABASE_FILE):
+                save_database({})
             browser.close()
             return
         
@@ -152,7 +161,6 @@ def main():
             title = show['title']
             print(f"\nProcessing: '{title}'")
 
-            # Jika anime belum ada di database
             if title not in db:
                 db[title] = {
                     'title': title,
@@ -165,11 +173,9 @@ def main():
 
             if new_episodes:
                 db[title]['episodes'].extend(new_episodes)
-                # Urutkan kembali daftar episode untuk konsistensi
                 db[title]['episodes'].sort(key=lambda x: int(''.join(filter(str.isdigit, x.get('episode_number', '0').split()[-1])) or 0))
                 print(f"   Berhasil menambahkan {len(new_episodes)} episode baru untuk '{title}'.")
             
-            # Simpan database setelah setiap anime selesai diproses
             save_database(db)
 
         page.close()
