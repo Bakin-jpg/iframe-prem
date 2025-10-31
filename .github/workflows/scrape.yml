@@ -1,22 +1,4 @@
-name: Scrape Anime Data
-
-on:
-  schedule:
-    # Jalankan setiap hari pukul 00:00 UTC
-    - cron: '0 0 * * *'
-  workflow_dispatch: # Untuk menjalankan manual
-
-jobs:
-  scrape:
-    runs-on: ubuntu-latest
-
-    # --- BAGIAN YANG DITAMBAHKAN ---
-    # Memberikan izin kepada GITHUB_TOKEN untuk melakukan push ke repositori.
-    permissions:
-      contents: write
-    # -----------------------------
-
-    steps:
+steps:
       - name: Check out repository code
         uses: actions/checkout@v3
 
@@ -32,7 +14,8 @@ jobs:
           python -m playwright install --with-deps chromium
 
       - name: Run scraper
-        run: python your_script_name.py # Ganti dengan nama file skrip Python Anda
+        # --- UBAH BARIS INI ---
+        run: python scraper.py # <--- Ganti dari your_script_name.py menjadi scraper.py
 
       - name: Commit and push if changed
         run: |
