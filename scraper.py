@@ -5,8 +5,8 @@ from urllib.parse import urljoin
 
 async def scrape_kickass_anime():
     """
-    Menggunakan loop retry sederhana untuk menangani lazy loading poster, 
-    yang lebih andal daripada wait_for_function yang kompleks.
+    Scrape data anime lengkap: judul, sinopsis, genre, poster, dan metadata
+    dari kickass-anime.ru.
     """
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
@@ -32,11 +32,9 @@ async def scrape_kickass_anime():
                 print(f"\n--- Memproses Item #{index + 1} ---")
                 detail_page = None
                 try:
-                    # --- [STRATEGI POSTER BARU: LOOP RETRY] ---
                     await item.scroll_into_view_if_needed()
                     
                     poster_url = "Tidak tersedia"
-                    # Coba ambil URL poster hingga 5 kali dengan jeda
                     for attempt in range(5):
                         poster_div = await item.query_selector(".v-image__image--cover")
                         if poster_div:
@@ -46,13 +44,11 @@ async def scrape_kickass_anime():
                                 if len(parts) > 1:
                                     poster_url_path = parts[1].split('")')[0]
                                     poster_url = urljoin(base_url, poster_url_path)
-                                    break # Jika berhasil, keluar dari loop
-                        # Jika belum berhasil, tunggu sebentar sebelum mencoba lagi
+                                    break
                         await page.wait_for_timeout(300) 
                     
                     print(f"URL Poster: {poster_url}")
 
-                    # Lanjutkan mengambil data lain yang sudah berfungsi...
                     detail_link_element = await item.query_selector("h2.show-title a")
                     if not detail_link_element:
                         print("Gagal menemukan link judul seri, melewati item ini.")
@@ -60,12 +56,10 @@ async def scrape_kickass_anime():
                         
                     detail_url_path = await detail_link_element.get_attribute("href")
                     full_detail_url = urljoin(base_url, detail_url_path)
-                    print(f"Membuka halaman detail seri: {full_detail_url}")
                     
-                    # Proses halaman detail
                     detail_page = await context.new_page()
                     await detail_page.goto(full_detail_url, timeout=90000)
-                    await detail_page.wait_for_selector(".anime-info-card .v-card__title span", timeout=30000)
+                    await detail_page.wait_for_selector(".anime-info-card", timeout=30000)
                     
                     title_element = await detail_page.query_selector(".anime-info-card .v-card__title span")
                     title = await title_element.inner_text() if title_element else "Judul tidak ditemukan"
@@ -79,14 +73,21 @@ async def scrape_kickass_anime():
                             synopsis = await synopsis_element.inner_text()
                     
                     genre_elements = await detail_page.query_selector_all(".anime-info-card .v-chip--outlined .v-chip__content")
-                    all_tags = [await genre.inner_text() for genre in genre_elements]
+                    all_tags = [await el.inner_text() for el in genre_elements]
                     irrelevant_tags = ['TV', 'PG-13', 'Airing', '2025', '23 min', '24 min', 'SUB', 'DUB', 'ONA']
                     genres = [tag for tag in all_tags if tag not in irrelevant_tags and not tag.startswith('EP')]
+
+                    # --- [TAMBAHAN] Mengambil Metadata (TV, PG-13, dll.) ---
+                    metadata_elements = await detail_page.query_selector_all(".anime-info-card .d-flex.mt-2.mb-3 div.text-subtitle-2")
+                    all_meta_texts = [await el.inner_text() for el in metadata_elements]
+                    metadata = [text.strip() for text in all_meta_texts if text and text.strip() != '•']
+                    # --------------------------------------------------------
 
                     anime_info = {
                         "judul": title.strip(),
                         "sinopsis": synopsis.strip(),
                         "genre": genres,
+                        "metadata": metadata, # <-- Menyimpan metadata
                         "url_poster": poster_url
                     }
                     scraped_data.append(anime_info)
@@ -100,7 +101,15 @@ async def scrape_kickass_anime():
             print("\n" + "="*50)
             print(f"HASIL SCRAPING SELESAI. Total {len(scraped_data)} data berhasil diambil.")
             print("="*50)
-                
+
+            # Menampilkan hasil akhir dengan format yang Anda inginkan
+            for anime in scraped_data:
+                print(f"\n{anime['judul']}")
+                print(' • '.join(anime['metadata']))
+                print("\nSynopsis")
+                print(anime['sinopsis'])
+                print("-" * 20)
+
             with open('anime_data.json', 'w', encoding='utf-8') as f:
                 json.dump(scraped_data, f, ensure_ascii=False, indent=4)
             print("\nData berhasil disimpan ke anime_data.json")
