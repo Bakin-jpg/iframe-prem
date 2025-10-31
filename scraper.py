@@ -15,10 +15,9 @@ async def scrape_kickass_anime():
         page = await context.new_page()
 
         try:
-            await page.goto("https://kickass-anime.ru/", timeout=90000) # Timeout lebih panjang
+            await page.goto("https://kickass-anime.ru/", timeout=90000)
             print("Berhasil membuka halaman utama.")
 
-            # Menunggu konten utama muncul
             await page.wait_for_selector(".latest-update .row.mt-0 .show-item", timeout=60000)
             print("Bagian 'Latest Update' ditemukan.")
 
@@ -27,7 +26,8 @@ async def scrape_kickass_anime():
 
             scraped_data = []
 
-            for index, item in enumerate(anime_items[:5]): # Ambil 5 anime pertama
+            # Ganti `[:5]` menjadi `[:]` atau hapus jika ingin scrape semua item di halaman
+            for index, item in enumerate(anime_items[:5]):
                 print(f"\n--- Memproses Item #{index + 1} ---")
                 detail_page = None
                 try:
@@ -53,21 +53,15 @@ async def scrape_kickass_anime():
                     detail_page = await context.new_page()
                     await detail_page.goto(full_detail_url, timeout=90000)
                     
-                    # --- PERBAIKAN UTAMA DAN FINAL DI SINI ---
-                    # Tunggu hingga kontainer info anime muncul
                     await detail_page.wait_for_selector(".anime-info-card", timeout=30000)
 
-                    # Selector yang BENAR untuk JUDUL
                     title_element = await detail_page.query_selector(".anime-info-card .v-card__title span")
                     title = await title_element.inner_text() if title_element else "Judul tidak ditemukan"
                     print(f"Judul: {title.strip()}")
 
-                    # Selector yang BENAR untuk SINOPSIS
-                    # Kita cari card yang judulnya "Synopsis", lalu ambil teks dari adiknya
                     synopsis_card_title = await detail_page.query_selector("div.v-card__title:has-text('Synopsis')")
                     synopsis = "Sinopsis tidak ditemukan"
                     if synopsis_card_title:
-                        # Ambil parent card, lalu cari text-caption di dalamnya
                         parent_card = await synopsis_card_title.query_selector("xpath=..")
                         synopsis_element = await parent_card.query_selector("div.text-caption")
                         if synopsis_element:
@@ -75,7 +69,6 @@ async def scrape_kickass_anime():
                     
                     print(f"Sinopsis: {synopsis[:50].strip()}...")
 
-                    # Selector untuk genre sudah benar
                     genre_elements = await detail_page.query_selector_all(".anime-info-card .v-chip--outlined .v-chip__content")
                     all_tags = [await genre.inner_text() for genre in genre_elements]
                     
