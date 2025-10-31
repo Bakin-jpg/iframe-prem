@@ -5,8 +5,8 @@ from urllib.parse import urljoin
 
 async def scrape_kickass_anime():
     """
-    Memperbaiki sintaks pemanggilan page.wait_for_function untuk menunggu poster
-    dengan andal sebelum mengambil data lainnya dari halaman detail.
+    Menggunakan loop retry sederhana untuk menangani lazy loading poster, 
+    yang lebih andal daripada wait_for_function yang kompleks.
     """
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
@@ -32,39 +32,27 @@ async def scrape_kickass_anime():
                 print(f"\n--- Memproses Item #{index + 1} ---")
                 detail_page = None
                 try:
+                    # --- [STRATEGI POSTER BARU: LOOP RETRY] ---
                     await item.scroll_into_view_if_needed()
                     
-                    poster_div = await item.query_selector(".v-image__image--cover")
                     poster_url = "Tidak tersedia"
-
-                    if poster_div:
-                        try:
-                            # --- [PERBAIKAN SINTAKS UTAMA] ---
-                            # Memperbaiki cara memanggil wait_for_function
-                            await page.wait_for_function(
-                                """(element) => {
-                                    if (!element) return false;
-                                    const style = window.getComputedStyle(element);
-                                    return style.backgroundImage && style.backgroundImage !== 'none';
-                                }""",
-                                poster_div, # Argumen ini dilewatkan sebagai 'element' di dalam JS
-                                timeout=5000
-                            )
-                            
-                            # Jika berhasil menunggu, baru ambil style
+                    # Coba ambil URL poster hingga 5 kali dengan jeda
+                    for attempt in range(5):
+                        poster_div = await item.query_selector(".v-image__image--cover")
+                        if poster_div:
                             poster_style = await poster_div.get_attribute("style")
                             if poster_style and 'url("' in poster_style:
                                 parts = poster_style.split('url("')
                                 if len(parts) > 1:
                                     poster_url_path = parts[1].split('")')[0]
                                     poster_url = urljoin(base_url, poster_url_path)
-
-                        except Exception as wait_error:
-                            print(f"Peringatan: Gagal menunggu gambar poster dimuat. Melanjutkan tanpa poster. Error: {wait_error}")
-
-                    print(f"URL Poster: {poster_url}")
+                                    break # Jika berhasil, keluar dari loop
+                        # Jika belum berhasil, tunggu sebentar sebelum mencoba lagi
+                        await page.wait_for_timeout(300) 
                     
-                    # Lanjutkan mengambil data lain...
+                    print(f"URL Poster: {poster_url}")
+
+                    # Lanjutkan mengambil data lain yang sudah berfungsi...
                     detail_link_element = await item.query_selector("h2.show-title a")
                     if not detail_link_element:
                         print("Gagal menemukan link judul seri, melewati item ini.")
@@ -72,14 +60,15 @@ async def scrape_kickass_anime():
                         
                     detail_url_path = await detail_link_element.get_attribute("href")
                     full_detail_url = urljoin(base_url, detail_url_path)
+                    print(f"Membuka halaman detail seri: {full_detail_url}")
                     
+                    # Proses halaman detail
                     detail_page = await context.new_page()
                     await detail_page.goto(full_detail_url, timeout=90000)
-                    
                     await detail_page.wait_for_selector(".anime-info-card .v-card__title span", timeout=30000)
+                    
                     title_element = await detail_page.query_selector(".anime-info-card .v-card__title span")
                     title = await title_element.inner_text() if title_element else "Judul tidak ditemukan"
-                    print(f"Judul: {title.strip()}")
 
                     synopsis_card_title = await detail_page.query_selector("div.v-card__title:has-text('Synopsis')")
                     synopsis = "Sinopsis tidak ditemukan"
