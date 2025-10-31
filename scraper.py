@@ -5,7 +5,7 @@ import json
 async def scrape_kickass_anime():
     """
     Fungsi ini melakukan scrape data anime terbaru dari kickass-anime.ru
-    dengan selector yang sudah diperbaiki untuk halaman detail.
+    dengan selector yang sudah divalidasi untuk judul dan sinopsis.
     """
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
@@ -15,10 +15,11 @@ async def scrape_kickass_anime():
         page = await context.new_page()
 
         try:
-            await page.goto("https://kickass-anime.ru/", timeout=60000)
+            await page.goto("https://kickass-anime.ru/", timeout=90000) # Timeout lebih panjang
             print("Berhasil membuka halaman utama.")
 
-            await page.wait_for_selector(".latest-update .row.mt-0", timeout=30000)
+            # Menunggu konten utama muncul
+            await page.wait_for_selector(".latest-update .row.mt-0 .show-item", timeout=60000)
             print("Bagian 'Latest Update' ditemukan.")
 
             anime_items = await page.query_selector_all(".latest-update .row.mt-0 .show-item")
@@ -50,26 +51,35 @@ async def scrape_kickass_anime():
                     print(f"Membuka halaman detail seri: {full_detail_url}")
 
                     detail_page = await context.new_page()
-                    await detail_page.goto(full_detail_url, timeout=60000)
+                    await detail_page.goto(full_detail_url, timeout=90000)
                     
-                    # --- PERBAIKAN UTAMA DI SINI ---
-                    # Tunggu secara spesifik hingga elemen judul dan sinopsis muncul
-                    await detail_page.wait_for_selector(".show-title-primary", timeout=30000)
-                    await detail_page.wait_for_selector(".show-synopsis", timeout=30000)
+                    # --- PERBAIKAN UTAMA DAN FINAL DI SINI ---
+                    # Tunggu hingga kontainer info anime muncul
+                    await detail_page.wait_for_selector(".anime-info-card", timeout=30000)
 
-                    # Gunakan selector yang benar untuk judul
-                    title_element = await detail_page.query_selector(".show-title-primary")
+                    # Selector yang BENAR untuk JUDUL
+                    title_element = await detail_page.query_selector(".anime-info-card .v-card__title span")
                     title = await title_element.inner_text() if title_element else "Judul tidak ditemukan"
                     print(f"Judul: {title.strip()}")
 
-                    # Selector untuk sinopsis sudah benar, sekarang seharusnya ditemukan
-                    synopsis_element = await detail_page.query_selector(".show-synopsis")
-                    synopsis = await synopsis_element.inner_text() if synopsis_element else "Sinopsis tidak ditemukan"
+                    # Selector yang BENAR untuk SINOPSIS
+                    # Kita cari card yang judulnya "Synopsis", lalu ambil teks dari adiknya
+                    synopsis_card_title = await detail_page.query_selector("div.v-card__title:has-text('Synopsis')")
+                    synopsis = "Sinopsis tidak ditemukan"
+                    if synopsis_card_title:
+                        # Ambil parent card, lalu cari text-caption di dalamnya
+                        parent_card = await synopsis_card_title.query_selector("xpath=..")
+                        synopsis_element = await parent_card.query_selector("div.text-caption")
+                        if synopsis_element:
+                            synopsis = await synopsis_element.inner_text()
+                    
+                    print(f"Sinopsis: {synopsis[:50].strip()}...")
 
-                    genre_elements = await detail_page.query_selector_all(".v-chip--outlined .v-chip__content")
+                    # Selector untuk genre sudah benar
+                    genre_elements = await detail_page.query_selector_all(".anime-info-card .v-chip--outlined .v-chip__content")
                     all_tags = [await genre.inner_text() for genre in genre_elements]
                     
-                    irrelevant_tags = ['TV', 'PG-13', 'Airing', '2025', '24 min', 'SUB', 'DUB', 'ONA']
+                    irrelevant_tags = ['TV', 'PG-13', 'Airing', '2025', '23 min', '24 min', 'SUB', 'DUB', 'ONA']
                     genres = [tag for tag in all_tags if tag not in irrelevant_tags and not tag.startswith('EP')]
                     print(f"Genre: {genres}")
 
@@ -95,7 +105,7 @@ async def scrape_kickass_anime():
             for anime in scraped_data:
                 print(f"\nJudul: {anime['judul']}")
                 print(f"Genre: {', '.join(anime['genre'])}")
-                print(f"Sinopsis: {anime['sinopsis'][:100]}...")
+                print(f"Sinopsis: {anime['sinopsis'][:100].strip()}...")
                 print(f"URL Poster: {anime['url_poster']}")
                 
             with open('anime_data.json', 'w', encoding='utf-8') as f:
