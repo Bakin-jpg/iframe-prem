@@ -1,1 +1,59 @@
-[]
+[
+    {
+        "judul": "Judul tidak ditemukan",
+        "sinopsis": "Sinopsis tidak ditemukan",
+        "genre": [
+            "Historical",
+            "Mystery",
+            "Mythology",
+            "Supernatural"
+        ],
+        "url_poster": "Tidak tersedia"
+    },
+    {
+        "judul": "Judul tidak ditemukan",
+        "sinopsis": "Sinopsis tidak ditemukan",
+        "genre": [
+            "Action",
+            "Comedy",
+            "Romance"
+        ],
+        "url_poster": "https://kickass-anime.ru/image/poster/may-i-ask-for-one-final-thing-c2af-hq.webp"
+    },
+    {
+        "judul": "Judul tidak ditemukan",
+        "sinopsis": "Sinopsis tidak ditemukan",
+        "genre": [
+            "Comedy",
+            "Drama",
+            "Romantic Subtext",
+            "School",
+            "Seinen"
+        ],
+        "url_poster": "https://kickass-anime.ru/image/poster/watari-kun-no-xx-ga-houkai-sunzen-f9a2-hq.webp"
+    },
+    {
+        "judul": "Judul tidak ditemukan",
+        "sinopsis": "Sinopsis tidak ditemukan",
+        "genre": [
+            "Action",
+            "Fantasy",
+            "Mythology",
+            "Shounen"
+        ],
+        "url_poster": "https://kickass-anime.ru/image/poster/tougen-anki-6802-hq.webp"
+    },
+    {
+        "judul": "Judul tidak ditemukan",
+        "sinopsis": "Sinopsis tidak ditemukan",
+        "genre": [
+            "Action",
+            "Adventure",
+            "Comedy",
+            "Mystery",
+            "Romance",
+            "Shounen"
+        ],
+        "url_poster": "https://kickass-anime.ru/image/poster/catseye-8d56-hq.webp"
+    }
+]
