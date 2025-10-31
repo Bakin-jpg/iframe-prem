@@ -5,13 +5,15 @@ from urllib.parse import urljoin
 
 async def scrape_kickass_anime():
     """
-    Scrape data anime lengkap: judul, sinopsis, genre, poster, dan metadata
-    dari kickass-anime.ru.
+    Scrape data anime lengkap dari kickass-anime.ru, dengan selector fleksibel
+    yang dapat menangani tata letak desktop dan mobile.
     """
     async with async_playwright() as p:
+        # Menggunakan viewport desktop sebagai default, karena server biasanya begitu
         browser = await p.chromium.launch(headless=True)
         context = await browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36",
+            viewport={'width': 1920, 'height': 1080}
         )
         page = await context.new_page()
 
@@ -32,8 +34,8 @@ async def scrape_kickass_anime():
                 print(f"\n--- Memproses Item #{index + 1} ---")
                 detail_page = None
                 try:
+                    # Ambil URL Poster dari halaman utama (sudah andal)
                     await item.scroll_into_view_if_needed()
-                    
                     poster_url = "Tidak tersedia"
                     for attempt in range(5):
                         poster_div = await item.query_selector(".v-image__image--cover")
@@ -45,49 +47,59 @@ async def scrape_kickass_anime():
                                     poster_url_path = parts[1].split('")')[0]
                                     poster_url = urljoin(base_url, poster_url_path)
                                     break
-                        await page.wait_for_timeout(300) 
-                    
+                        await page.wait_for_timeout(300)
                     print(f"URL Poster: {poster_url}")
 
+                    # Ambil URL detail (sudah andal)
                     detail_link_element = await item.query_selector("h2.show-title a")
                     if not detail_link_element:
                         print("Gagal menemukan link judul seri, melewati item ini.")
                         continue
-                        
+                    
                     detail_url_path = await detail_link_element.get_attribute("href")
                     full_detail_url = urljoin(base_url, detail_url_path)
                     
+                    # Buka halaman detail
                     detail_page = await context.new_page()
                     await detail_page.goto(full_detail_url, timeout=90000)
                     await detail_page.wait_for_selector(".anime-info-card", timeout=30000)
                     
+                    # --- [PERBAIKAN UTAMA DI SINI] ---
+
+                    # 1. Selector Judul (sudah andal)
                     title_element = await detail_page.query_selector(".anime-info-card .v-card__title span")
                     title = await title_element.inner_text() if title_element else "Judul tidak ditemukan"
 
+                    # 2. Selector Sinopsis (sudah andal)
                     synopsis_card_title = await detail_page.query_selector("div.v-card__title:has-text('Synopsis')")
                     synopsis = "Sinopsis tidak ditemukan"
                     if synopsis_card_title:
                         parent_card = await synopsis_card_title.query_selector("xpath=..")
-                        synopsis_element = await parent_card.query_selector("div.text-caption")
+                        synopsis_element = await parent_card.query_selector(".text-caption")
                         if synopsis_element:
                             synopsis = await synopsis_element.inner_text()
                     
+                    # 3. Selector Genre (sudah andal)
                     genre_elements = await detail_page.query_selector_all(".anime-info-card .v-chip--outlined .v-chip__content")
                     all_tags = [await el.inner_text() for el in genre_elements]
-                    irrelevant_tags = ['TV', 'PG-13', 'Airing', '2025', '23 min', '24 min', 'SUB', 'DUB', 'ONA']
+                    irrelevant_tags = ['TV', 'PG-13', 'Airing', '2025', '2024', '23 min', '24 min', 'SUB', 'DUB', 'ONA']
                     genres = [tag for tag in all_tags if tag not in irrelevant_tags and not tag.startswith('EP')]
 
-                    # --- [TAMBAHAN] Mengambil Metadata (TV, PG-13, dll.) ---
-                    metadata_elements = await detail_page.query_selector_all(".anime-info-card .d-flex.mt-2.mb-3 div.text-subtitle-2")
-                    all_meta_texts = [await el.inner_text() for el in metadata_elements]
-                    metadata = [text.strip() for text in all_meta_texts if text and text.strip() != '•']
+                    # 4. Selector METADATA yang fleksibel (Desktop OR Mobile)
+                    metadata_selector = ".anime-info-card .d-flex.mb-3, .anime-info-card .d-flex.mt-2.mb-3"
+                    metadata_container = await detail_page.query_selector(metadata_selector)
+                    metadata = []
+                    if metadata_container:
+                        metadata_elements = await metadata_container.query_selector_all(".text-subtitle-2")
+                        all_meta_texts = [await el.inner_text() for el in metadata_elements]
+                        metadata = [text.strip() for text in all_meta_texts if text and text.strip() != '•']
                     # --------------------------------------------------------
 
                     anime_info = {
                         "judul": title.strip(),
                         "sinopsis": synopsis.strip(),
                         "genre": genres,
-                        "metadata": metadata, # <-- Menyimpan metadata
+                        "metadata": metadata,
                         "url_poster": poster_url
                     }
                     scraped_data.append(anime_info)
@@ -101,15 +113,7 @@ async def scrape_kickass_anime():
             print("\n" + "="*50)
             print(f"HASIL SCRAPING SELESAI. Total {len(scraped_data)} data berhasil diambil.")
             print("="*50)
-
-            # Menampilkan hasil akhir dengan format yang Anda inginkan
-            for anime in scraped_data:
-                print(f"\n{anime['judul']}")
-                print(' • '.join(anime['metadata']))
-                print("\nSynopsis")
-                print(anime['sinopsis'])
-                print("-" * 20)
-
+                
             with open('anime_data.json', 'w', encoding='utf-8') as f:
                 json.dump(scraped_data, f, ensure_ascii=False, indent=4)
             print("\nData berhasil disimpan ke anime_data.json")
