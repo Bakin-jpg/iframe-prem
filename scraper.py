@@ -1,10 +1,11 @@
-# scraper.py (Final Version - Mengambil data dari JSON di dalam <script>)
+# scraper.py (Final - Menggunakan Scroll + Ambil URL dari Gambar Poster)
 
 import json
 import time
 import os
 import re
 from playwright.sync_api import sync_playwright, TimeoutError
+from bs4 import BeautifulSoup
 
 DATABASE_FILE = "anime_database.json"
 
@@ -14,7 +15,12 @@ def load_database():
         try:
             with open(DATABASE_FILE, 'r', encoding='utf-8') as f:
                 print(f"Database '{DATABASE_FILE}' ditemukan dan dimuat.")
-                return {show['title']: show for show in json.load(f)}
+                data = json.load(f)
+                # Pastikan data adalah list dan tidak kosong
+                if isinstance(data, list) and data:
+                    return {show['title']: show for show in data if 'title' in show}
+                else:
+                    return {}
         except (json.JSONDecodeError, KeyError, TypeError):
             print(f"[PERINGATAN] File database '{DATABASE_FILE}' rusak atau formatnya lama. Memulai dari awal.")
             return {}
@@ -30,52 +36,54 @@ def save_database(data_dict):
 
 def get_shows_from_main_page(page):
     """
-    METODE BARU: Ekstrak data langsung dari objek JavaScript 'window.KAA'
-    yang ada di dalam HTML. Ini lebih cepat dan jauh lebih andal.
+    Mengambil daftar anime dengan metode scrolling, lalu mengambil judul
+    dan URL episode dari link gambar poster.
     """
     url = "https://kickass-anime.ru/"
-    print("\n=== TAHAP 1: MENGAMBIL DATA ANIME DARI SCRIPT TAG ===")
+    print("\n=== TAHAP 1: MENGAMBIL DAFTAR ANIME DARI HALAMAN UTAMA ===")
     shows = {}
     try:
-        page.goto(url, timeout=120000, wait_until='domcontentloaded')
+        page.goto(url, timeout=120000)
+        page.wait_for_selector('div.latest-update div.show-item', timeout=60000)
         
-        # Ambil seluruh konten HTML halaman
+        # Lakukan scrolling untuk memuat semua item
+        last_height = page.evaluate("document.body.scrollHeight")
+        while True:
+            page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+            time.sleep(2.5) # Jeda agar konten baru sempat dimuat
+            new_height = page.evaluate("document.body.scrollHeight")
+            if new_height == last_height:
+                break
+            last_height = new_height
+            
         html_content = page.content()
-        
-        # Gunakan regex untuk menemukan blok 'latestShow' di dalam script
-        match = re.search(r'latestShow:(\[.*?\]),trendingShow', html_content, re.DOTALL)
-        
-        if not match:
-            print("[ERROR] Tidak dapat menemukan blok data 'latestShow' di dalam halaman.")
-            return []
-        
-        # Grup 1 dari match adalah string array '[{...}, {...}]'
-        latest_show_str = match.group(1)
+        soup = BeautifulSoup(html_content, 'html.parser')
 
-        # Temukan semua objek di dalam string array (setiap objek adalah satu anime)
-        anime_objects = re.findall(r'({.*?})', latest_show_str, re.DOTALL)
+        for item in soup.find_all('div', class_='show-item'):
+            try:
+                # Ambil elemen judul dan poster
+                title_element = item.select_one('h2.show-title a')
+                poster_element = item.select_one('a.show-poster') # Ini adalah link yang membungkus gambar
 
-        for obj_str in anime_objects:
-            # Ekstrak title_en dan watch_uri dari setiap objek
-            title_match = re.search(r'title_en:"(.*?)"', obj_str)
-            uri_match = re.search(r'watch_uri:"(.*?)"', obj_str)
+                # PENTING: Lakukan pengecekan untuk memastikan kedua elemen ada
+                if title_element and poster_element:
+                    title = title_element.text.strip()
+                    episode_page_url = "https://kickass-anime.ru" + poster_element.get('href', '')
 
-            if title_match and uri_match:
-                title = title_match.group(1).encode('utf-8').decode('unicode-escape')
-                watch_uri = uri_match.group(1).encode('utf-8').decode('unicode-escape')
+                    # Pastikan title dan URL tidak kosong
+                    if title and episode_page_url:
+                        shows[title] = {
+                            'title': title,
+                            'episode_page_url': episode_page_url
+                        }
+            except (AttributeError, IndexError):
+                # Abaikan item yang rusak dan lanjutkan ke item berikutnya
+                continue
                 
-                if title and watch_uri:
-                    full_url = "https://kickass-anime.ru" + watch_uri
-                    shows[title] = {
-                        'title': title,
-                        'episode_page_url': full_url
-                    }
-
-        print(f"Menemukan {len(shows)} anime unik dari data script.")
+        print(f"Menemukan {len(shows)} anime unik di halaman utama.")
         return list(shows.values())
-
     except Exception as e:
-        print(f"[ERROR di Tahap 1] Gagal mengekstrak data anime: {e}")
+        print(f"[ERROR di Tahap 1] Gagal mengambil daftar anime: {e}")
         return []
 
 def scrape_episodes_from_url(page, episode_page_url, existing_episode_numbers):
@@ -152,7 +160,7 @@ def main():
         if not shows_list:
             print("Tidak dapat mengambil daftar anime. Program berhenti.")
             if not os.path.exists(DATABASE_FILE):
-                save_database({})
+                save_database({}) # Buat file JSON kosong agar git tidak error
             browser.close()
             return
         
