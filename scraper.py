@@ -5,8 +5,8 @@ from urllib.parse import urljoin
 
 async def scrape_kickass_anime():
     """
-    Mengambil poster dari halaman utama dengan andal menggunakan scroll dan wait,
-    lalu mengambil sisa data dari halaman detail.
+    Memperbaiki sintaks pemanggilan page.wait_for_function untuk menunggu poster
+    dengan andal sebelum mengambil data lainnya dari halaman detail.
     """
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
@@ -32,37 +32,39 @@ async def scrape_kickass_anime():
                 print(f"\n--- Memproses Item #{index + 1} ---")
                 detail_page = None
                 try:
-                    # --- [STRATEGI POSTER BARU DAN ANDAL] ---
-                    # 1. Scroll ke item untuk memicu lazy loading
                     await item.scroll_into_view_if_needed()
                     
-                    # 2. Tunggu secara eksplisit hingga gambar dimuat (maksimal 5 detik)
                     poster_div = await item.query_selector(".v-image__image--cover")
-                    try:
-                        await poster_div.wait_for_element_state("stable", timeout=5000)
-                        await page.wait_for_function(
-                            """(element) => {
-                                const style = window.getComputedStyle(element);
-                                return style.backgroundImage && style.backgroundImage !== 'none';
-                            }""",
-                            poster_div,
-                            timeout=5000
-                        )
-                    except Exception as wait_error:
-                        print(f"Peringatan: Gagal menunggu gambar poster dimuat: {wait_error}")
-
-                    # 3. Ekstrak URL poster setelah menunggu
                     poster_url = "Tidak tersedia"
-                    if poster_div:
-                        poster_style = await poster_div.get_attribute("style")
-                        if poster_style and 'url("' in poster_style:
-                            parts = poster_style.split('url("')
-                            if len(parts) > 1:
-                                poster_url_path = parts[1].split('")')[0]
-                                poster_url = urljoin(base_url, poster_url_path)
-                    print(f"URL Poster: {poster_url}")
 
-                    # --- Logika Mengambil Data Detail (yang sudah berhasil) ---
+                    if poster_div:
+                        try:
+                            # --- [PERBAIKAN SINTAKS UTAMA] ---
+                            # Memperbaiki cara memanggil wait_for_function
+                            await page.wait_for_function(
+                                """(element) => {
+                                    if (!element) return false;
+                                    const style = window.getComputedStyle(element);
+                                    return style.backgroundImage && style.backgroundImage !== 'none';
+                                }""",
+                                poster_div, # Argumen ini dilewatkan sebagai 'element' di dalam JS
+                                timeout=5000
+                            )
+                            
+                            # Jika berhasil menunggu, baru ambil style
+                            poster_style = await poster_div.get_attribute("style")
+                            if poster_style and 'url("' in poster_style:
+                                parts = poster_style.split('url("')
+                                if len(parts) > 1:
+                                    poster_url_path = parts[1].split('")')[0]
+                                    poster_url = urljoin(base_url, poster_url_path)
+
+                        except Exception as wait_error:
+                            print(f"Peringatan: Gagal menunggu gambar poster dimuat. Melanjutkan tanpa poster. Error: {wait_error}")
+
+                    print(f"URL Poster: {poster_url}")
+                    
+                    # Lanjutkan mengambil data lain...
                     detail_link_element = await item.query_selector("h2.show-title a")
                     if not detail_link_element:
                         print("Gagal menemukan link judul seri, melewati item ini.")
@@ -70,8 +72,7 @@ async def scrape_kickass_anime():
                         
                     detail_url_path = await detail_link_element.get_attribute("href")
                     full_detail_url = urljoin(base_url, detail_url_path)
-                    print(f"Membuka halaman detail seri: {full_detail_url}")
-
+                    
                     detail_page = await context.new_page()
                     await detail_page.goto(full_detail_url, timeout=90000)
                     
