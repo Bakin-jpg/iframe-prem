@@ -6,20 +6,27 @@ import re
 
 async def scrape_episodes_via_api(context, base_url, anime_slug):
     """
-    Scrape daftar episode menggunakan API, lalu kunjungi episode terpilih
-    untuk mendapatkan URL iframe.
+    Scrape daftar episode menggunakan API dengan metode pengambilan JSON yang benar.
     """
     episodes_data = []
+    # API tidak memerlukan parameter 'ep' atau 'lang' untuk mendapatkan daftar lengkap
     api_url = urljoin(base_url, f"/api/show/{anime_slug}/episodes")
     
+    api_page = None # Inisialisasi
     try:
-        # Gunakan context untuk membuat halaman sementara untuk request API
         api_page = await context.new_page()
         print(f"   -> Mengambil daftar episode dari API: {api_url}")
         
-        # Pergi ke URL API dan dapatkan konten JSON-nya
         await api_page.goto(api_url)
-        json_response = await api_page.json()
+        
+        # --- [PERBAIKAN KUNCI DI SINI] ---
+        # Ambil konten sebagai teks, lalu parse menggunakan library json
+        content = await api_page.content()
+        # Ambil hanya bagian JSON dari HTML
+        json_text = await api_page.evaluate('() => document.body.textContent') 
+        json_response = json.loads(json_text)
+        # ---------------------------------
+
         await api_page.close()
 
         if not json_response or 'result' not in json_response or not json_response['result']:
@@ -29,12 +36,10 @@ async def scrape_episodes_via_api(context, base_url, anime_slug):
         all_episodes = json_response['result']
         print(f"   -> API mengembalikan total {len(all_episodes)} episode.")
 
-        # Urutkan episode berdasarkan nomor, dari terbaru ke terlama
-        # Menggunakan float untuk menangani episode .5
+        # Urutkan episode dari yang terbaru
         all_episodes.sort(key=lambda x: float(x.get('episode_number', 0)), reverse=True)
 
         episodes_to_scrape = all_episodes
-        # Terapkan logika cicilan
         if len(all_episodes) > 20:
             print(f"   -> Lebih dari 20 episode, menerapkan cicilan (mengambil 10 terbaru).")
             episodes_to_scrape = all_episodes[:10]
@@ -58,7 +63,6 @@ async def scrape_episodes_via_api(context, base_url, anime_slug):
                 iframe_element = await ep_page.query_selector("iframe.player")
                 iframe_src = await iframe_element.get_attribute("src") if iframe_element else "iframe tidak ditemukan"
                 
-                # Logika untuk mendeteksi bahasa dan membuat URL server
                 base_iframe_src = iframe_src.split('&ln=')[0] if '&ln=' in iframe_src else iframe_src
                 available_languages = {}
 
@@ -94,11 +98,11 @@ async def scrape_episodes_via_api(context, base_url, anime_slug):
 
     except Exception as e:
         print(f"   -> Gagal total saat mengambil daftar episode dari API: {type(e).__name__}: {e}")
-        if 'api_page' in locals() and not api_page.is_closed():
+        if api_page and not api_page.is_closed():
             await api_page.close()
         return []
 
-
+# ... Fungsi `scrape_kickass_anime` tetap sama ...
 async def scrape_kickass_anime():
     """
     Fungsi utama untuk scrape data anime dan memanggil fungsi scrape episode via API.
@@ -201,6 +205,7 @@ async def scrape_kickass_anime():
             print(f"Terjadi kesalahan fatal: {type(e).__name__}: {e}")
         finally:
             await browser.close()
+
 
 if __name__ == "__main__":
     asyncio.run(scrape_kickass_anime())
