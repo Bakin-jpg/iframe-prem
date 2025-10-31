@@ -4,8 +4,8 @@ import json
 
 async def scrape_kickass_anime():
     """
-    Fungsi ini melakukan scrape data anime terbaru dari kickass-anime.ru
-    dengan selector yang sudah divalidasi untuk judul dan sinopsis.
+    Fungsi ini melakukan scrape SEMUA anime terbaru dari kickass-anime.ru
+    dan menangani lazy loading untuk gambar poster.
     """
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
@@ -26,11 +26,15 @@ async def scrape_kickass_anime():
 
             scraped_data = []
 
-            # Ganti `[:5]` menjadi `[:]` atau hapus jika ingin scrape semua item di halaman
-            for index, item in enumerate(anime_items[:5]):
+            # --- [PERBAIKAN 1] Batasan '[:5]' dihapus untuk memproses semua item ---
+            for index, item in enumerate(anime_items):
                 print(f"\n--- Memproses Item #{index + 1} ---")
                 detail_page = None
                 try:
+                    # --- [PERBAIKAN 2] Scroll ke item untuk memicu lazy loading gambar ---
+                    await item.scroll_into_view_if_needed()
+                    await page.wait_for_timeout(100) # Beri jeda sesaat agar gambar sempat dimuat
+
                     poster_url = "Tidak tersedia"
                     poster_div = await item.query_selector(".v-image__image")
                     if poster_div:
@@ -92,14 +96,8 @@ async def scrape_kickass_anime():
                         await detail_page.close()
 
             print("\n" + "="*50)
-            print("HASIL SCRAPING SELESAI")
+            print(f"HASIL SCRAPING SELESAI. Total {len(scraped_data)} data berhasil diambil.")
             print("="*50)
-
-            for anime in scraped_data:
-                print(f"\nJudul: {anime['judul']}")
-                print(f"Genre: {', '.join(anime['genre'])}")
-                print(f"Sinopsis: {anime['sinopsis'][:100].strip()}...")
-                print(f"URL Poster: {anime['url_poster']}")
                 
             with open('anime_data.json', 'w', encoding='utf-8') as f:
                 json.dump(scraped_data, f, ensure_ascii=False, indent=4)
