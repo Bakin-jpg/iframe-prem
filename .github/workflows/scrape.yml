@@ -1,0 +1,56 @@
+name: Scrape Latest Anime Episodes
+
+on:
+  schedule:
+    # Atur jadwal di sini. Contoh: berjalan setiap 6 jam.
+    - cron: '0 */6 * * *'
+  workflow_dispatch: # Tombol untuk menjalankan manual
+
+permissions:
+  contents: write # Beri izin untuk menulis kembali ke repositori
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    steps:
+      # Langkah 1: Checkout kode dari repositori Anda
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      # Langkah 2: Siapkan lingkungan Python
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      # Langkah 3: Install semua pustaka yang dibutuhkan dari requirements.txt
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # Langkah 4: Install browser yang dibutuhkan oleh Playwright
+      - name: Install Playwright browsers
+        run: playwright install --with-deps chromium
+
+      # Langkah 5: Jalankan skrip scraper utama Anda
+      - name: Run scraper
+        run: python -u scraper.py
+
+      # Langkah 6: Commit dan push file database yang sudah diperbarui
+      - name: Commit and push changes
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add anime_database.json
+          # Hanya commit jika ada perubahan pada file
+          if git diff-index --quiet HEAD; then
+            echo "No changes to commit."
+          else
+            git commit -m "Update anime database" -a
+          fi
+      - name: Push changes
+        uses: ad-m/github-push-action@master
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          branch: main
