@@ -1,11 +1,12 @@
 import asyncio
 from playwright.async_api import async_playwright
 import json
+from urllib.parse import urljoin # <-- Tambahkan import ini
 
 async def scrape_kickass_anime():
     """
     Fungsi ini melakukan scrape data anime terbaru dari kickass-anime.ru
-    dengan perbaikan pada penggabungan URL.
+    dengan perbaikan final pada penggabungan URL menggunakan urljoin.
     """
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
@@ -15,7 +16,7 @@ async def scrape_kickass_anime():
         page = await context.new_page()
 
         try:
-            base_url = "https://kickass-anime.ru"
+            base_url = "https://kickass-anime.ru/" # Base URL
             await page.goto(base_url, timeout=90000, wait_until="domcontentloaded")
             print("Berhasil membuka halaman utama.")
 
@@ -27,6 +28,7 @@ async def scrape_kickass_anime():
 
             scraped_data = []
 
+            # Loop untuk semua item
             for index, item in enumerate(anime_items):
                 print(f"\n--- Memproses Item #{index + 1} ---")
                 detail_page = None
@@ -38,8 +40,9 @@ async def scrape_kickass_anime():
                         
                     detail_url_path = await detail_link_element.get_attribute("href")
                     
-                    # --- [PERBAIKAN UTAMA] Memastikan URL digabung dengan benar ---
-                    full_detail_url = f"{base_url}{detail_url_path}"
+                    # --- [PERBAIKAN UTAMA DAN FINAL] ---
+                    # Menggunakan urljoin untuk menggabungkan URL secara aman dan benar
+                    full_detail_url = urljoin(base_url, detail_url_path)
                     print(f"Membuka halaman detail seri: {full_detail_url}")
 
                     detail_page = await context.new_page()
@@ -58,7 +61,7 @@ async def scrape_kickass_anime():
                         if poster_style and 'url("' in poster_style:
                             parts = poster_style.split('url("')
                             if len(parts) > 1:
-                                poster_url = parts[1].split('")')[0]
+                                poster_url = urljoin(base_url, parts[1].split('")')[0]) # Gabungkan juga URL poster
                     print(f"URL Poster: {poster_url}")
 
                     synopsis_card_title = await detail_page.query_selector("div.v-card__title:has-text('Synopsis')")
@@ -87,7 +90,7 @@ async def scrape_kickass_anime():
                     await detail_page.close()
 
                 except Exception as e:
-                    print(f"!!! Gagal mengambil data untuk item #{index + 1}: {e}")
+                    print(f"!!! Gagal mengambil data untuk item #{index + 1}: {type(e).__name__}: {e}")
                     if detail_page and not detail_page.is_closed():
                         await detail_page.close()
 
@@ -100,7 +103,7 @@ async def scrape_kickass_anime():
             print("\nData berhasil disimpan ke anime_data.json")
 
         except Exception as e:
-            print(f"Terjadi kesalahan fatal: {e}")
+            print(f"Terjadi kesalahan fatal: {type(e).__name__}: {e}")
         finally:
             await browser.close()
 
