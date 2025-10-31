@@ -4,8 +4,8 @@ import json
 
 async def scrape_kickass_anime():
     """
-    Fungsi ini melakukan scrape SEMUA anime terbaru dari kickass-anime.ru
-    dan menangani lazy loading untuk gambar poster.
+    Fungsi ini melakukan scrape data anime terbaru dari kickass-anime.ru,
+    mengambil SEMUA data (termasuk poster) dari halaman detail untuk keandalan maksimal.
     """
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
@@ -15,10 +15,12 @@ async def scrape_kickass_anime():
         page = await context.new_page()
 
         try:
-            await page.goto("https://kickass-anime.ru/", timeout=90000)
+            print("Membuka halaman utama...")
+            await page.goto("https://kickass-anime.ru/", timeout=90000, wait_until="domcontentloaded")
             print("Berhasil membuka halaman utama.")
 
-            await page.wait_for_selector(".latest-update .row.mt-0 .show-item", timeout=60000)
+            # Tunggu hingga item anime pertama muncul, ini cukup untuk memastikan halaman dimuat
+            await page.wait_for_selector(".latest-update .row.mt-0 .show-item h2.show-title a", timeout=60000)
             print("Bagian 'Latest Update' ditemukan.")
 
             anime_items = await page.query_selector_all(".latest-update .row.mt-0 .show-item")
@@ -26,25 +28,12 @@ async def scrape_kickass_anime():
 
             scraped_data = []
 
-            # --- [PERBAIKAN 1] Batasan '[:5]' dihapus untuk memproses semua item ---
+            # Hapus batasan '[:5]' untuk memproses semua item
             for index, item in enumerate(anime_items):
                 print(f"\n--- Memproses Item #{index + 1} ---")
                 detail_page = None
                 try:
-                    # --- [PERBAIKAN 2] Scroll ke item untuk memicu lazy loading gambar ---
-                    await item.scroll_into_view_if_needed()
-                    await page.wait_for_timeout(100) # Beri jeda sesaat agar gambar sempat dimuat
-
-                    poster_url = "Tidak tersedia"
-                    poster_div = await item.query_selector(".v-image__image")
-                    if poster_div:
-                        poster_style = await poster_div.get_attribute("style")
-                        if poster_style and 'url("' in poster_style:
-                            parts = poster_style.split('url("')
-                            if len(parts) > 1:
-                                poster_url = parts[1].split('")')[0]
-                    print(f"URL Poster: {poster_url}")
-
+                    # HANYA ambil URL detail dari halaman utama
                     detail_link_element = await item.query_selector("h2.show-title a")
                     if not detail_link_element:
                         print("Gagal menemukan link judul seri, melewati item ini.")
@@ -54,15 +43,31 @@ async def scrape_kickass_anime():
                     full_detail_url = f"https://kickass-anime.ru{detail_url}"
                     print(f"Membuka halaman detail seri: {full_detail_url}")
 
+                    # Buka halaman detail untuk mengambil SEMUA informasi
                     detail_page = await context.new_page()
                     await detail_page.goto(full_detail_url, timeout=90000)
                     
+                    # Tunggu hingga elemen kunci di halaman detail muncul
                     await detail_page.wait_for_selector(".anime-info-card", timeout=30000)
 
+                    # 1. Ambil Judul
                     title_element = await detail_page.query_selector(".anime-info-card .v-card__title span")
                     title = await title_element.inner_text() if title_element else "Judul tidak ditemukan"
                     print(f"Judul: {title.strip()}")
 
+                    # 2. Ambil URL Poster dari halaman detail
+                    poster_url = "Tidak tersedia"
+                    # Selector menargetkan poster di sisi kiri atas halaman detail
+                    poster_div = await detail_page.query_selector(".banner-section .v-image__image--cover")
+                    if poster_div:
+                        poster_style = await poster_div.get_attribute("style")
+                        if poster_style and 'url("' in poster_style:
+                            parts = poster_style.split('url("')
+                            if len(parts) > 1:
+                                poster_url = parts[1].split('")')[0]
+                    print(f"URL Poster: {poster_url}")
+
+                    # 3. Ambil Sinopsis
                     synopsis_card_title = await detail_page.query_selector("div.v-card__title:has-text('Synopsis')")
                     synopsis = "Sinopsis tidak ditemukan"
                     if synopsis_card_title:
@@ -70,12 +75,11 @@ async def scrape_kickass_anime():
                         synopsis_element = await parent_card.query_selector("div.text-caption")
                         if synopsis_element:
                             synopsis = await synopsis_element.inner_text()
-                    
                     print(f"Sinopsis: {synopsis[:50].strip()}...")
-
+                    
+                    # 4. Ambil Genre
                     genre_elements = await detail_page.query_selector_all(".anime-info-card .v-chip--outlined .v-chip__content")
                     all_tags = [await genre.inner_text() for genre in genre_elements]
-                    
                     irrelevant_tags = ['TV', 'PG-13', 'Airing', '2025', '23 min', '24 min', 'SUB', 'DUB', 'ONA']
                     genres = [tag for tag in all_tags if tag not in irrelevant_tags and not tag.startswith('EP')]
                     print(f"Genre: {genres}")
