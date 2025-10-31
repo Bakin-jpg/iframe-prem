@@ -5,66 +5,75 @@ from urllib.parse import urljoin
 
 async def scrape_episodes(detail_page, base_url):
     """
-    Fungsi terpisah untuk menangani scraping semua episode dari halaman detail.
+    Fungsi terpisah untuk menangani scraping semua episode dari halaman detail,
+    dengan penanganan untuk menunggu komponen episode dimuat oleh JavaScript.
     """
     episodes_data = []
     
-    # 1. Klik tombol "Watch Now" untuk pindah ke halaman pemutaran
+    # 1. Klik tombol "Watch Now"
     watch_now_button = await detail_page.query_selector("a.pulse-button")
     if not watch_now_button:
-        print("   -> Tombol 'Watch Now' tidak ditemukan. Tidak bisa mengambil episode.")
+        print("   -> Tombol 'Watch Now' tidak ditemukan.")
         return episodes_data
     
     await watch_now_button.click()
-    # Tunggu navigasi ke halaman pemutaran dan iframe player muncul
     await detail_page.wait_for_selector("iframe.player", timeout=60000)
     print("   -> Berhasil masuk ke halaman pemutaran.")
 
-    # 2. Deteksi semua halaman episode yang tersedia di dropdown 'Page'
+    # --- [PERBAIKAN KUNCI] Tunggu hingga daftar episode benar-benar dimuat oleh JS ---
+    try:
+        print("   -> Menunggu komponen daftar episode dimuat...")
+        await detail_page.wait_for_selector(".episode-list-content .episode-item", timeout=30000)
+        print("   -> Komponen daftar episode berhasil dimuat.")
+    except Exception:
+        print("   -> Gagal menemukan item episode setelah 30 detik. Mungkin tidak ada episode.")
+        return []
+    # ---------------------------------------------------------------------------------
+
     page_dropdown_selector = "div.v-select__slot:has-text('Page')"
     page_dropdown = await detail_page.query_selector(page_dropdown_selector)
     episode_pages_to_visit = []
 
     if page_dropdown:
-        print("   -> Dropdown halaman episode ditemukan. Mengambil semua halaman...")
+        print("   -> Dropdown halaman episode ditemukan...")
         await page_dropdown.click()
-        # Tunggu item menu dropdown muncul
         await detail_page.wait_for_selector(".v-menu__content.menuable__content__active .v-list-item", timeout=10000)
         page_options = await detail_page.query_selector_all(".v-menu__content.menuable__content__active .v-list-item__title")
         for option in page_options:
-            page_text = await option.inner_text()
-            episode_pages_to_visit.append(page_text)
+            episode_pages_to_visit.append(await option.inner_text())
+        
+        if episode_pages_to_visit == ['No data available']:
+            print("   -> Tidak ada episode yang tersedia untuk di-scrape.")
+            await detail_page.click("body", position={"x": 5, "y": 5})
+            return []
+            
         print(f"   -> Ditemukan halaman: {episode_pages_to_visit}")
-        # Klik di luar dropdown untuk menutupnya
         await detail_page.click("body", position={"x": 5, "y": 5}) 
     else:
-        episode_pages_to_visit.append("default") # Hanya ada satu halaman episode
+        episode_pages_to_visit.append("default")
 
     all_episode_links = {}
 
-    # 3. Iterasi melalui setiap halaman episode
     for page_range in episode_pages_to_visit:
         if page_range != "default":
             print(f"   -> Mengakses episode di halaman '{page_range}'...")
             await page_dropdown.click()
             await detail_page.wait_for_timeout(500)
             await detail_page.click(f".v-menu__content.menuable__content__active .v-list-item__title:has-text('{page_range}')")
-            await detail_page.wait_for_timeout(2000) # Tunggu episode baru dimuat
-
-        # Ambil semua link episode di halaman saat ini
-        episode_elements = await detail_page.query_selector_all(".episode-item a.v-card")
+            await detail_page.wait_for_load_state('networkidle', timeout=30000)
+        
+        episode_elements = await detail_page.query_selector_all(".episode-item .v-card--link")
+        print(f"   -> Menemukan {len(episode_elements)} episode di halaman '{page_range}'.")
         for el in episode_elements:
             ep_link = await el.get_attribute("href")
             ep_number_el = await el.query_selector(".episode-badge .v-chip__content")
-            if ep_number_el:
+            if ep_number_el and ep_link:
                 ep_number_text = await ep_number_el.inner_text()
                 all_episode_links[ep_number_text] = urljoin(base_url, ep_link)
 
-    print(f"   -> Total episode ditemukan: {len(all_episode_links)}")
+    print(f"   -> Total episode ditemukan di semua halaman: {len(all_episode_links)}")
 
-    # 4. Terapkan logika cicilan: jika > 20 episode, ambil 10 terbaru
-    episodes_to_scrape = list(all_episode_links.items())
-    episodes_to_scrape.sort(key=lambda x: int(''.join(filter(str.isdigit, x[0]))), reverse=True)
+    episodes_to_scrape = sorted(all_episode_links.items(), key=lambda x: int(''.join(filter(str.isdigit, x[0]))), reverse=True)
 
     if len(episodes_to_scrape) > 20:
         print(f"   -> Lebih dari 20 episode, menerapkan cicilan (mengambil 10 terbaru).")
@@ -72,7 +81,6 @@ async def scrape_episodes(detail_page, base_url):
     
     print(f"   -> Akan men-scrape {len(episodes_to_scrape)} episode.")
 
-    # 5. Kunjungi setiap link episode yang dipilih untuk mendapatkan URL iframe
     for ep_number_text, ep_url in episodes_to_scrape:
         try:
             print(f"      -> Mengambil iframe untuk {ep_number_text}...")
@@ -82,9 +90,7 @@ async def scrape_episodes(detail_page, base_url):
             iframe_element = await detail_page.query_selector("iframe.player")
             iframe_src = await iframe_element.get_attribute("src") if iframe_element else "iframe tidak ditemukan"
             
-            # Deteksi pilihan Sub/Dub
             available_languages = {"SUB": None, "DUB": None, "ES": None, "CN": None}
-
             sub_dub_dropdown = await detail_page.query_selector("div.v-select__slot:has-text('Sub/Dub')")
             if sub_dub_dropdown:
                 await sub_dub_dropdown.click()
@@ -92,36 +98,29 @@ async def scrape_episodes(detail_page, base_url):
                 lang_options = await detail_page.query_selector_all(".v-menu__content.menuable__content__active .v-list-item__title")
                 for lang_option in lang_options:
                     lang_text = await lang_option.inner_text()
-                    if "SUB" in lang_text.upper(): available_languages["SUB"] = iframe_src
-                    if "DUB" in lang_text.upper(): available_languages["DUB"] = iframe_src.replace("&ln=en-US", "&ln=en-US").replace("&ln=ja-JP", "&ln=en-US")
-                    if "ESPAÑOL" in lang_text.upper(): available_languages["ES"] = iframe_src.replace("&ln=en-US", "&ln=es-ES").replace("&ln=ja-JP", "&ln=es-ES")
-                await detail_page.click("body", position={"x": 5, "y": 5}) # Tutup dropdown
+                    if "JAPANESE" in lang_text.upper() or "SUB" in lang_text.upper():
+                        available_languages["SUB"] = iframe_src.replace("&ln=en-US", "&ln=ja-JP")
+                    if "ENGLISH" in lang_text.upper() or "DUB" in lang_text.upper():
+                        available_languages["DUB"] = iframe_src.replace("&ln=ja-JP", "&ln=en-US")
+                    if "ESPAÑOL" in lang_text.upper():
+                        available_languages["ES"] = iframe_src.replace("&ln=en-US", "&ln=es-ES").replace("&ln=ja-JP", "&ln=es-ES")
+                await detail_page.click("body", position={"x": 5, "y": 5})
             else:
-                available_languages["SUB"] = iframe_src # Default
+                available_languages["SUB"] = iframe_src
 
-            # Logika khusus untuk server China (tipe hls)
-            vidstreaming_button = await detail_page.query_selector("button.v-btn:has-text('VidStreaming')")
-            if not vidstreaming_button: # Jika bukan Vidstreaming, kemungkinan server China
+            if "vidstream" not in iframe_src.lower():
                 available_languages["CN"] = iframe_src
             
-            # Hapus kunci yang nilainya None
             final_languages = {k: v for k, v in available_languages.items() if v}
-
-            episodes_data.append({
-                "episode": ep_number_text,
-                "servers": final_languages
-            })
+            episodes_data.append({"episode": ep_number_text, "servers": final_languages})
 
         except Exception as e:
             print(f"      -> Gagal mengambil iframe untuk {ep_number_text}: {type(e).__name__}: {e}")
 
     return episodes_data
 
-
 async def scrape_kickass_anime():
-    """
-    Fungsi utama untuk scrape data anime dan memanggil fungsi scrape episode.
-    """
+    # ... Fungsi ini TIDAK PERLU diubah, tetap sama seperti sebelumnya ...
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
         context = await browser.new_context(
@@ -194,7 +193,6 @@ async def scrape_kickass_anime():
                         all_meta_texts = [await el.inner_text() for el in metadata_elements]
                         metadata = [text.strip() for text in all_meta_texts if text and text.strip() != '•']
                     
-                    # Panggil fungsi untuk scrape episode
                     print(f"   -> Memulai scraping episode untuk: {title.strip()}")
                     episodes_list = await scrape_episodes(detail_page, base_url)
 
@@ -226,6 +224,7 @@ async def scrape_kickass_anime():
             print(f"Terjadi kesalahan fatal: {type(e).__name__}: {e}")
         finally:
             await browser.close()
+
 
 if __name__ == "__main__":
     asyncio.run(scrape_kickass_anime())
