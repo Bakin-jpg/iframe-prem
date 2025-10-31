@@ -4,8 +4,8 @@ import json
 
 async def scrape_kickass_anime():
     """
-    Fungsi ini melakukan scrape data anime terbaru dari kickass-anime.ru,
-    dengan selector poster yang sudah divalidasi dan paling spesifik.
+    Fungsi ini melakukan scrape data anime terbaru dari kickass-anime.ru
+    dengan perbaikan pada penggabungan URL.
     """
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
@@ -15,8 +15,8 @@ async def scrape_kickass_anime():
         page = await context.new_page()
 
         try:
-            print("Membuka halaman utama...")
-            await page.goto("https://kickass-anime.ru/", timeout=90000, wait_until="domcontentloaded")
+            base_url = "https://kickass-anime.ru"
+            await page.goto(base_url, timeout=90000, wait_until="domcontentloaded")
             print("Berhasil membuka halaman utama.")
 
             await page.wait_for_selector(".latest-update .row.mt-0 .show-item h2.show-title a", timeout=60000)
@@ -27,7 +27,6 @@ async def scrape_kickass_anime():
 
             scraped_data = []
 
-            # Hapus batasan '[:5]' jika ingin scrape semua item
             for index, item in enumerate(anime_items):
                 print(f"\n--- Memproses Item #{index + 1} ---")
                 detail_page = None
@@ -37,8 +36,10 @@ async def scrape_kickass_anime():
                         print("Gagal menemukan link judul seri, melewati item ini.")
                         continue
                         
-                    detail_url = await detail_link_element.get_attribute("href")
-                    full_detail_url = f"https://kickass-anime.ru{detail_url}"
+                    detail_url_path = await detail_link_element.get_attribute("href")
+                    
+                    # --- [PERBAIKAN UTAMA] Memastikan URL digabung dengan benar ---
+                    full_detail_url = f"{base_url}{detail_url_path}"
                     print(f"Membuka halaman detail seri: {full_detail_url}")
 
                     detail_page = await context.new_page()
@@ -46,15 +47,11 @@ async def scrape_kickass_anime():
                     
                     await detail_page.wait_for_selector(".anime-info-card", timeout=30000)
 
-                    # 1. Ambil Judul
                     title_element = await detail_page.query_selector(".anime-info-card .v-card__title span")
                     title = await title_element.inner_text() if title_element else "Judul tidak ditemukan"
                     print(f"Judul: {title.strip()}")
 
-                    # --- [PERBAIKAN UTAMA POSTER] ---
-                    # 2. Ambil URL Poster dari elemen yang lebih spesifik dan andal
                     poster_url = "Tidak tersedia"
-                    # Selector ini menargetkan poster yang lebih kecil di tengah
                     poster_element = await detail_page.query_selector(".banner-section .col-6 .v-image__image--cover")
                     if poster_element:
                         poster_style = await poster_element.get_attribute("style")
@@ -64,7 +61,6 @@ async def scrape_kickass_anime():
                                 poster_url = parts[1].split('")')[0]
                     print(f"URL Poster: {poster_url}")
 
-                    # 3. Ambil Sinopsis
                     synopsis_card_title = await detail_page.query_selector("div.v-card__title:has-text('Synopsis')")
                     synopsis = "Sinopsis tidak ditemukan"
                     if synopsis_card_title:
@@ -74,7 +70,6 @@ async def scrape_kickass_anime():
                             synopsis = await synopsis_element.inner_text()
                     print(f"Sinopsis: {synopsis[:50].strip()}...")
                     
-                    # 4. Ambil Genre
                     genre_elements = await detail_page.query_selector_all(".anime-info-card .v-chip--outlined .v-chip__content")
                     all_tags = [await genre.inner_text() for genre in genre_elements]
                     irrelevant_tags = ['TV', 'PG-13', 'Airing', '2025', '23 min', '24 min', 'SUB', 'DUB', 'ONA']
