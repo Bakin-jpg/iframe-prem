@@ -1,5 +1,24 @@
 [
     {
+        "judul": "Beyblade X",
+        "sinopsis": "Kazami Bird, aiming to become a professional, meets former champion Kurosu Ex also known as 'Kamen X' and forms a team so that they can aim for the \"top\" of the X Tower. But what awaits them is a spectacular battle that no one has ever seen before. The yet unseen 'X'. The super accelerated (Xtreme) beyblade runs through a new era!",
+        "genre": [
+            "Adventure",
+            "Kids",
+            "Sports"
+        ],
+        "metadata": [
+            "TV",
+            "PG",
+            "Airing",
+            "2023",
+            "25 min",
+            "SUB"
+        ],
+        "url_poster": "https://kickass-anime.ru/image/poster/beyblade-x-07e3-hq.webp",
+        "episodes": []
+    },
+    {
         "judul": "Style of Hiroshi Nohara Lunch",
         "sinopsis": "This series follows Hiroshi Nohara's ultimate lunchtime philosophy, as he carefully selects and enjoys his midday meals within the constraints of a limited budget and break time. But it's not just about savoring food—Hiroshi delves into cooking trivia, preparation methods, and the everyday dilemmas of a salaryman. From debating whether to treat his juniors to lunch, to finding quick meals between sales meetings, and even venting about his boss, the series is packed with relatable moments for working professionals.",
         "genre": [
@@ -75,25 +94,6 @@
             "DUB"
         ],
         "url_poster": "https://kickass-anime.ru/image/poster/may-i-ask-for-one-final-thing-c2af-hq.webp",
-        "episodes": []
-    },
-    {
-        "judul": "Watari-kun's ****** Is about to Collapse",
-        "sinopsis": "Two years ago, the death of Naoto Watari's parents left him as the sole caretaker for his younger sister Suzushiro \"Suzu\" Watari and forced him to move in with their aunt. So devoted is he to Suzu that he refuses to join clubs or even hang out with anyone, earning him snide comments and the title of \"siscon\" at his new school. But as long as Suzu is safe and happy, Naoto does not care what everyone else says. However, his sneering classmates may turn out to be the least of his worries. The sudden transfer of a girl named Satsuki Tachibana brings back traumatic memories from his past—a past she had a hand in making so unpleasant. Nasty secrets, unknown to Naoto, begin to surface with her arrival, threatening his new life.",
-        "genre": [
-            "Comedy",
-            "Drama",
-            "Romantic Subtext",
-            "School",
-            "Seinen"
-        ],
-        "metadata": [
-            "TV",
-            "Airing",
-            "2025",
-            "SUB"
-        ],
-        "url_poster": "https://kickass-anime.ru/image/poster/watari-kun-no-xx-ga-houkai-sunzen-f9a2-hq.webp",
         "episodes": []
     }
 ]
